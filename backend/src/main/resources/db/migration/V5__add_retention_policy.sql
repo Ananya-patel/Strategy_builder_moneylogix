@@ -1,0 +1,1 @@
+﻿SELECT add_retention_policy('market_tick', INTERVAL '30 days');
