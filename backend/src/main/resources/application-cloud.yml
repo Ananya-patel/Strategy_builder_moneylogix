@@ -13,6 +13,8 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  flyway:
+    locations: classpath:db/migration-cloud
 logging:
   level:
     com.moneylogix: INFO
