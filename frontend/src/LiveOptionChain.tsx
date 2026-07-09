@@ -13,21 +13,28 @@ interface ChainPayload {
   chain: ChainRow[];
 }
 
+type Status = "connecting" | "live" | "reconnecting";
+
 export default function LiveOptionChain({ symbol = "NIFTY" }: { symbol?: string }) {
   const [data, setData] = useState<ChainPayload | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<Status>("connecting");
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
     const ws = new WebSocket(`ws://localhost:8000/ws/options-chain/${symbol}`);
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
+    ws.onopen = () => setStatus("live");
+    ws.onclose = () => setStatus("reconnecting");
+    ws.onerror = () => setStatus("reconnecting");
     ws.onmessage = (event) => {
       setData(JSON.parse(event.data));
+      setLastUpdate(new Date());
     };
 
     return () => ws.close();
   }, [symbol]);
+
+  const live = status === "live";
 
   return (
     <div className="mt-6 bg-gradient-to-b from-[#161c28] to-[#131722] border border-gray-800 rounded-xl p-6 shadow-lg shadow-black/20">
@@ -36,20 +43,31 @@ export default function LiveOptionChain({ symbol = "NIFTY" }: { symbol?: string 
           Live Option Chain <span className="text-gray-600">·</span>{" "}
           <span className="text-emerald-400">{symbol}</span>
         </h3>
-        <div className="flex items-center gap-2 bg-[#0e1116] px-3 py-1.5 rounded-full border border-gray-800/60">
-          <span className="relative flex h-2 w-2">
-            {connected && (
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            )}
-            <span
-              className={`relative inline-flex rounded-full h-2 w-2 ${
-                connected ? "bg-emerald-400" : "bg-gray-600"
-              }`}
-            />
-          </span>
-          <span className="text-xs font-mono text-gray-400">
-            {connected ? `${data?.spot.toFixed(2) ?? "—"}` : "Connecting…"}
-          </span>
+        <div className="flex items-center gap-3">
+          {lastUpdate && (
+            <span className="text-[10px] font-mono text-gray-600">
+              upd {lastUpdate.toLocaleTimeString()}
+            </span>
+          )}
+          <div className="flex items-center gap-2 bg-[#0e1116] px-3 py-1.5 rounded-full border border-gray-800/60">
+            <span className="relative flex h-2 w-2">
+              {live && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  live ? "bg-emerald-400" : status === "reconnecting" ? "bg-amber-400" : "bg-gray-600"
+                }`}
+              />
+            </span>
+            <span className="text-xs font-mono text-gray-400">
+              {live
+                ? `LIVE · ${data?.spot.toFixed(2) ?? "—"}`
+                : status === "reconnecting"
+                ? "RECONNECTING…"
+                : "Connecting…"}
+            </span>
+          </div>
         </div>
       </div>
 

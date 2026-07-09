@@ -74,6 +74,8 @@ export interface PayoffResponse {
   leg_greeks: LegGreeks[];
   net_delta: number;
   net_theta: number;
+  market_iv?: number;      // market-derived volatility used for Greeks
+  data_source?: string;    // "live" or "mock"
 }
 
 export async function getPayoff(

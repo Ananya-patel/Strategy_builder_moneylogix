@@ -6,6 +6,7 @@ import numpy as np
 from scipy.stats import norm
 from pydantic import BaseModel
 from typing import List, Optional
+from market_data import get_provider
 
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -109,7 +110,7 @@ class OptionLeg(BaseModel):
     strike: float
     premium: float
     quantity: int = 1
-    iv: Optional[float] = 0.15           # implied volatility, default 15%
+    iv: Optional[float] = None           # None => filled from market vol
     days_to_expiry: Optional[int] = 7    # default 1 week out
 
 class PayoffRequest(BaseModel):
@@ -117,6 +118,8 @@ class PayoffRequest(BaseModel):
     spot_range_pct: float = 0.1  # +/-10% around current spot
     current_spot: float
     steps: int = 100
+    symbol: Optional[str] = "NIFTY"   # used to pull market vol
+    provider: str = "mock"            # "mock" or "live"
 
 
 def leg_payoff(leg: OptionLeg, spot_prices: np.ndarray) -> np.ndarray:
@@ -160,7 +163,8 @@ def calculate_greeks(spot: float, strike: float, option_type: str,
 
 def leg_greeks_signed(leg: OptionLeg, spot: float):
     """Greeks for a leg, sign-adjusted for buy (+1) vs sell (-1) and quantity."""
-    raw = calculate_greeks(spot, leg.strike, leg.option_type, leg.days_to_expiry, leg.iv)
+    iv = leg.iv if leg.iv is not None else 0.15
+    raw = calculate_greeks(spot, leg.strike, leg.option_type, leg.days_to_expiry, iv)
     direction = 1 if leg.position == "buy" else -1
     return {
         "delta": round(raw["delta"] * direction * leg.quantity, 4),
@@ -170,6 +174,18 @@ def leg_greeks_signed(leg: OptionLeg, spot: float):
 
 @app.post("/api/payoff")
 def calculate_payoff(req: PayoffRequest):
+    # Pull market-derived volatility; fall back safely if the live API fails.
+    md = get_provider(req.provider)
+    try:
+        market_iv = md.get_hist_vol(req.symbol or "NIFTY")
+    except Exception:
+        market_iv = 0.15
+
+    # Any leg without an explicit IV inherits the market volatility.
+    for leg in req.legs:
+        if leg.iv is None:
+            leg.iv = market_iv
+
     low = req.current_spot * (1 - req.spot_range_pct)
     high = req.current_spot * (1 + req.spot_range_pct)
     spot_prices = np.linspace(low, high, req.steps)
@@ -217,6 +233,8 @@ def calculate_payoff(req: PayoffRequest):
         "leg_greeks": leg_greeks,
         "net_delta": round(net_delta, 4),
         "net_theta": round(net_theta, 4),
+        "market_iv": round(market_iv, 4),
+        "data_source": req.provider,
     }
 
 # ---------------- Step 8: Margin Estimator ----------------
@@ -264,3 +282,10 @@ def calculate_margin(req: MarginRequest):
         "is_defined_risk": is_defined_risk,
         "max_loss": max_loss if is_defined_risk else "unlimited",
     }
+
+
+@app.get("/api/market/{symbol}")
+def market(symbol: str, provider: str = "mock"):
+    md = get_provider(provider)
+    return {"symbol": symbol, "spot": md.get_spot(symbol),
+            "hist_vol": md.get_hist_vol(symbol), "source": provider}

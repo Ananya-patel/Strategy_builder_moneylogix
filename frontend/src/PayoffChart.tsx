@@ -6,11 +6,21 @@ interface Props {
   currentSpot: number;
 }
 
+// Pins the gradient color-flip exactly at P&L = 0 regardless of curve shape.
+function offsetZero(payoff: number[]) {
+  const max = Math.max(...payoff);
+  const min = Math.min(...payoff);
+  if (max <= 0) return 0;   // all loss
+  if (min >= 0) return 1;   // all profit
+  return max / (max - min); // fraction of height that is profit
+}
+
 export default function PayoffChart({ data, currentSpot }: Props) {
   const chartData = data.spot_prices.map((s, i) => ({
     spot: s,
     payoff: data.payoff[i],
   }));
+  const off = offsetZero(data.payoff);
 
   return (
     <div className="mt-6 bg-gradient-to-b from-[#161c28] to-[#131722] border border-gray-800 rounded-xl p-6 shadow-lg shadow-black/20">
@@ -23,8 +33,10 @@ export default function PayoffChart({ data, currentSpot }: Props) {
         <AreaChart data={chartData}>
           <defs>
             <linearGradient id="payoffGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+              <stop offset={0}   stopColor="#10b981" stopOpacity={0.6} />
+              <stop offset={off} stopColor="#10b981" stopOpacity={0.05} />
+              <stop offset={off} stopColor="#f43f5e" stopOpacity={0.05} />
+              <stop offset={1}   stopColor="#f43f5e" stopOpacity={0.6} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#1f2530" vertical={false} />
@@ -55,7 +67,7 @@ export default function PayoffChart({ data, currentSpot }: Props) {
           <Area
             type="monotone"
             dataKey="payoff"
-            stroke="#10b981"
+            stroke="#e2e8f0"
             strokeWidth={2.5}
             fill="url(#payoffGradient)"
             dot={false}

@@ -3,6 +3,7 @@ import { saveRiskProfile, getRecommendation, getPayoff, saveStrategy, type RiskA
 import PayoffChart from "./PayoffChart";
 import LiveOptionChain from "./LiveOptionChain";
 import SavedStrategies from "./SavedStrategies";
+import StrategyBuilder from "./Strategybuilder";
 
 const QUESTIONS: { key: keyof RiskAnswers; label: string }[] = [
   { key: "loss_tolerance", label: "Loss tolerance before panicking" },
@@ -56,6 +57,7 @@ function App() {
   });
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
   const [payoff, setPayoff] = useState<PayoffResponse | null>(null);
+  const [builderLegs, setBuilderLegs] = useState<OptionLeg[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -77,6 +79,7 @@ function App() {
 
       const legs = STRATEGY_LEGS[rec.recommendedStrategy.name] ?? [];
       if (legs.length > 0) {
+        setBuilderLegs(legs);   // load the recommended legs into the live builder
         const payoffData = await getPayoff(legs, CURRENT_SPOT);
         setPayoff(payoffData);
       }
@@ -203,9 +206,21 @@ function App() {
             <h2 className="text-xl font-semibold text-gray-100 mb-2">
               {recommendation.recommendedStrategy.name}
             </h2>
-            <p className="text-gray-400 text-sm leading-relaxed mb-5">
+            <p className="text-gray-400 text-sm leading-relaxed mb-3">
               {recommendation.recommendedStrategy.description}
             </p>
+
+            {/* Live-data proof: shows judges the volatility is market-derived, not assumed */}
+            {payoff?.market_iv != null && (
+              <div className="mb-5 inline-flex items-center gap-2 text-[11px] font-mono px-2.5 py-1 rounded-md bg-[#0e1116] border border-gray-800 text-gray-400">
+                <span className="text-gray-500">IV sourced</span>
+                <span className="text-emerald-400">{(payoff.market_iv * 100).toFixed(1)}%</span>
+                <span className="text-gray-600">·</span>
+                <span className={payoff.data_source === "live" ? "text-emerald-400" : "text-amber-400"}>
+                  {payoff.data_source === "live" ? "live" : "simulated"}
+                </span>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-800">
               <div>
@@ -224,18 +239,28 @@ function App() {
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-1">Max Profit</div>
-                <div className="font-mono text-sm text-gray-300">
-                  {recommendation.recommendedStrategy.maxProfit ?? "—"}
+                <div className="font-mono text-sm text-emerald-400">
+                  {payoff?.max_profit ?? recommendation.recommendedStrategy.maxProfit ?? "—"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-1">Max Loss</div>
-                <div className="font-mono text-sm text-gray-300">
-                  {recommendation.recommendedStrategy.maxLoss ?? "—"}
+                <div className="font-mono text-sm text-rose-400">
+                  {payoff?.max_loss ?? recommendation.recommendedStrategy.maxLoss ?? "—"}
                 </div>
               </div>
             </div>
           </div>
+        )}
+
+        {/* Free-form builder: edit legs, chart redraws live. Seeded by the recommendation. */}
+        {builderLegs && (
+          <StrategyBuilder
+            key={recommendation?.recommendedStrategy.name ?? "custom"}
+            spot={CURRENT_SPOT}
+            initialLegs={builderLegs}
+            onPayoff={setPayoff}
+          />
         )}
 
         {payoff && (

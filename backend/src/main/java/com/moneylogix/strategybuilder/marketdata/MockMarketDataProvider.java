@@ -1,7 +1,5 @@
 package com.moneylogix.strategybuilder.marketdata;
 
-import org.springframework.stereotype.Component;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -9,7 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+
 @Component
+@Profile("!live")   // active by default; disabled when the "live" profile is on
 public class MockMarketDataProvider implements MarketDataProvider {
 
     private static final Random RNG = new Random();
@@ -26,6 +28,18 @@ public class MockMarketDataProvider implements MarketDataProvider {
             ticks.add(buildTick(symbol, strike, "PUT", spotPrice));
         }
         return ticks;
+    }
+
+    // NEW — satisfies the interface. Mock just returns its simulated spot.
+    @Override
+    public double getSpot(String symbol) {
+        return spotPrice;
+    }
+
+    // NEW — satisfies the interface. Mock returns a fixed assumed volatility.
+    @Override
+    public double getHistVol(String symbol) {
+        return 0.15;
     }
 
     private OptionTick buildTick(String symbol, double strike,
@@ -73,7 +87,4 @@ public class MockMarketDataProvider implements MarketDataProvider {
     private BigDecimal bd(double val) {
         return BigDecimal.valueOf(val).setScale(2, RoundingMode.HALF_UP);
     }
-
-    @Override
-    public String name() { return "MOCK"; }
 }
