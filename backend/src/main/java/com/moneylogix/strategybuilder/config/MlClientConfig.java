@@ -11,7 +11,7 @@ public class MlClientConfig {
     @Bean
     public RestClient mlRestClient() {
         return RestClient.builder()
-                .baseUrl("http://localhost:8000")
+                .baseUrl("https://strategy-builder-ml.onrender.com")
                 .requestFactory(new SimpleClientHttpRequestFactory())
                 .build();
     }
