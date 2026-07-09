@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { saveRiskProfile, getRecommendation, type RiskAnswers, type RecommendationResponse } from "./api";
+import { saveRiskProfile, getRecommendation, getPayoff, saveStrategy, type RiskAnswers, type RecommendationResponse, type PayoffResponse, type OptionLeg } from "./api";
+import PayoffChart from "./PayoffChart";
+import LiveOptionChain from "./LiveOptionChain";
+import SavedStrategies from "./SavedStrategies";
 
 const QUESTIONS: { key: keyof RiskAnswers; label: string }[] = [
   { key: "loss_tolerance", label: "Loss tolerance before panicking" },
@@ -18,6 +21,30 @@ const BAND_COLOR: Record<string, string> = {
   AGGRESSIVE: "text-rose-400 bg-rose-950 border-rose-800",
 };
 
+const BAND_GLOW: Record<string, string> = {
+  CONSERVATIVE: "shadow-blue-500/10 border-blue-900/50",
+  MODERATE: "shadow-amber-500/10 border-amber-900/50",
+  AGGRESSIVE: "shadow-rose-500/10 border-rose-900/50",
+};
+const CURRENT_SPOT = 24800;
+
+const STRATEGY_LEGS: Record<string, OptionLeg[]> = {
+  "Iron Condor": [
+    { option_type: "put", position: "sell", strike: 24600, premium: 30 },
+    { option_type: "put", position: "buy", strike: 24500, premium: 15 },
+    { option_type: "call", position: "sell", strike: 25000, premium: 30 },
+    { option_type: "call", position: "buy", strike: 25100, premium: 15 },
+  ],
+  "Covered Call": [
+    { option_type: "call", position: "sell", strike: 25000, premium: 40 },
+  ],
+  "Long Straddle": [
+    { option_type: "call", position: "buy", strike: 24800, premium: 60 },
+    { option_type: "put", position: "buy", strike: 24800, premium: 55 },
+  ],
+};
+
+
 function App() {
   const [answers, setAnswers] = useState<RiskAnswers>({
     loss_tolerance: 2,
@@ -28,8 +55,12 @@ function App() {
     goal: 2,
   });
   const [recommendation, setRecommendation] = useState<RecommendationResponse | null>(null);
+  const [payoff, setPayoff] = useState<PayoffResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleChange = (key: keyof RiskAnswers, value: number) => {
     setAnswers((prev) => ({ ...prev, [key]: value }));
@@ -43,6 +74,12 @@ function App() {
       await saveRiskProfile(answers);
       const rec = await getRecommendation("NIFTY");
       setRecommendation(rec);
+
+      const legs = STRATEGY_LEGS[rec.recommendedStrategy.name] ?? [];
+      if (legs.length > 0) {
+        const payoffData = await getPayoff(legs, CURRENT_SPOT);
+        setPayoff(payoffData);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -50,8 +87,41 @@ function App() {
     }
   };
 
+  const handleSaveStrategy = async () => {
+    if (!recommendation) return;
+    const legs = STRATEGY_LEGS[recommendation.recommendedStrategy.name] ?? [];
+    if (legs.length === 0) return;
+
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + 30);
+      const expiryDate = expiry.toISOString().split("T")[0];
+
+      await saveStrategy({
+        name: recommendation.recommendedStrategy.name,
+        underlyingSymbol: recommendation.symbol,
+        legs: legs.map((l) => ({
+          optionType: l.option_type,
+          action: l.position,
+          strikePrice: l.strike,
+          expiryDate,
+          quantity: l.quantity ?? 1,
+          premium: l.premium,
+        })),
+      });
+      setSaveMessage("Strategy saved");
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setSaveMessage(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0e1116] text-gray-200 flex font-sans">
+    <div className="min-h-screen bg-[#0e1116] bg-[radial-gradient(ellipse_at_top,_#151a24_0%,_#0e1116_60%)] text-gray-200 flex font-sans">
       {/* Sidebar */}
       <aside className="w-56 bg-[#131722] border-r border-gray-800 flex-shrink-0 hidden md:flex flex-col">
         <div className="px-5 py-5 border-b border-gray-800">
@@ -114,7 +184,11 @@ function App() {
         )}
 
         {recommendation && (
-          <div className="mt-6 bg-[#151a24] border border-gray-800 rounded-lg p-6">
+          <div
+            className={`mt-6 bg-gradient-to-b from-[#161c28] to-[#151a24] border rounded-xl p-6 shadow-xl ${
+              BAND_GLOW[recommendation.riskBand] ?? "border-gray-800 shadow-black/20"
+            }`}
+          >
             <div className="flex items-center justify-between mb-4">
               <span
                 className={`text-xs font-mono px-2.5 py-1 rounded border ${
@@ -135,9 +209,17 @@ function App() {
 
             <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-800">
               <div>
-                <div className="text-xs text-gray-500 mb-1">Confidence</div>
-                <div className="text-emerald-400 font-mono text-sm font-semibold">
-                  {(recommendation.confidence * 100).toFixed(0)}%
+                <div className="text-xs text-gray-500 mb-1.5">Confidence</div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full transition-all"
+                      style={{ width: `${recommendation.confidence * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-emerald-400 font-mono text-xs font-semibold">
+                    {(recommendation.confidence * 100).toFixed(0)}%
+                  </span>
                 </div>
               </div>
               <div>
@@ -155,6 +237,28 @@ function App() {
             </div>
           </div>
         )}
+
+        {payoff && (
+          <>
+            <PayoffChart data={payoff} currentSpot={CURRENT_SPOT} />
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={handleSaveStrategy}
+                disabled={saving}
+                className="px-6 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 rounded-md py-2 text-sm font-medium transition-colors border border-gray-700"
+              >
+                {saving ? "Saving…" : "Save Strategy"}
+              </button>
+              {saveMessage && (
+                <span className="text-xs text-emerald-400 font-mono">{saveMessage}</span>
+              )}
+            </div>
+          </>
+        )}
+
+        <LiveOptionChain symbol="NIFTY" />
+
+        <SavedStrategies refreshKey={refreshKey} />
       </main>
     </div>
   );
